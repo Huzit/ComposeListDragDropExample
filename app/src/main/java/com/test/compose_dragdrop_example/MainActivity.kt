@@ -1,6 +1,7 @@
 package com.test.compose_dragdrop_example
 
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
@@ -75,6 +76,7 @@ fun LazyColumnDragAndDropDemo() {
     //DragDrop 상태
     val dragDropState = rememberDragDropState(listState) { fromIndex, toIndex ->
         list = list.toMutableList().apply {
+            Log.d("from - to", "$fromIndex $toIndex")
             add(toIndex, removeAt(fromIndex))
         }
     }
@@ -110,6 +112,7 @@ fun rememberDragDropState(
     lazyListState: LazyListState,
     onMove: (Int, Int) -> Unit
 ): DragDropState {
+    //컴포지션(init)을 종료한 후 자동으로 취소되도록 범위를 지정해줌 <- 안하면 - 컴포지션이 종료되도 코루틴이 돌것이다.
     val scope = rememberCoroutineScope()
     val state = remember(lazyListState) {
         DragDropState(
@@ -118,8 +121,10 @@ fun rememberDragDropState(
             scope = scope
         )
     }
+    //key의 state가 recomposition이 될 때 블락 안에 있는 suspend fun 이 작동하도록 함
     LaunchedEffect(state) {
         while (true) {
+            //scrollChannel 로 부터 콜백 받음
             val diff = state.scrollChannel.receive()
             //픽셀 값 만큼 즉시 점프
             lazyListState.scrollBy(diff)
@@ -134,43 +139,44 @@ class DragDropState internal constructor(
     private val scope: CoroutineScope,
     private val onMove: (Int, Int) -> Unit
 ) {
-    //현재 드래그 중인 아이템 인덱스
+    /**현재 드래그 중인 아이템 인덱스*/
     var draggingItemIndex by mutableStateOf<Int?>(null)
         private set
-    //스크롤 이벤트를 저장하기위한 채널 생성
+    /**스크롤 이벤트를 저장하기위한 채널 생성*/
     internal val scrollChannel = Channel<Float>()
-    //드래그 중인 아이템의 델타? 값
+    /**드래그 중인 아이템의 y 값*/
     private var draggingItemDraggedDelta by mutableStateOf(0f)
-    //드래그 중인 아이템 초기 옾셋
+    /**드래그 중인 아이템 초기 옾셋*/
     private var draggingItemInitialOffset by mutableStateOf(0)
-    //현재 드래그 중인 아이템의 옾셋
+    /**현재 드래그 중인 아이템의 옾셋*/
     internal val draggingItemOffset: Float
         get() = draggingItemLayoutInfo?.let { item ->
             draggingItemInitialOffset + draggingItemDraggedDelta - item.offset
         } ?: 0f
-    //드래그 중인 아이템 레이아웃 정보 , swap 이벤트 정의를 위해 필요
+    /**드래그 중인 아이템 레이아웃 정보 , swap 이벤트 정의를 위해 필요*/
     private val draggingItemLayoutInfo: LazyListItemInfo?
         get() = state.layoutInfo.visibleItemsInfo
             .firstOrNull { it.index == draggingItemIndex }
-    //직전에 드래그 했던 아이템의 인덱스
+    /**직전에 드래그 했던 아이템의 인덱스*/
     internal var previousIndexOfDraggedItem by mutableStateOf<Int?>(null)
         private set
-    //직저 드래그 아이템 옾셋
+    /**직전 드래그 아이템 옾셋*/
     internal var previousItemOffset = Animatable(0f)
         private set
-    //드래그 시작 콜백
+    /**드래그 시작 콜백*/
     internal fun onDragStart(offset: Offset) {
         //LazyList에서 보여지는 아이템의 정보를 불러옴 -> 선택한 아이템의 오프셋 범위 중 제일 1원소를 가져옴
         state.layoutInfo.visibleItemsInfo
             .firstOrNull { item ->
                 offset.y.toInt() in item.offset..(item.offsetEnd)
             }?.also {
-                //각 변수 초기화
+                //드래그 하는 아이템 인덱스
                 draggingItemIndex = it.index
+                //드래그 아이템 y축 시작 좌표값
                 draggingItemInitialOffset = it.offset
             }
     }
-    //드래그가 알 수 없는 이유로 중단되었을 때
+    /**드래그가 중단되었을 때*/
     internal fun onDragInterrupted() {
         //드래그 중일 때
         if (draggingItemIndex != null) {
@@ -198,7 +204,7 @@ class DragDropState internal constructor(
         draggingItemIndex = null
         draggingItemInitialOffset = 0
     }
-    //드래깅 콜백
+    /**드래깅 콜백*/
     internal fun onDrag(offset: Offset) {
         //드래그한 Y값 -> 이동 값
         draggingItemDraggedDelta += offset.y
@@ -257,11 +263,11 @@ class DragDropState internal constructor(
             }
         }
     }
-    //offsetEnd를 리턴하는 확장함수
+    /**offsetEnd를 리턴하는 확장함수*/
     private val LazyListItemInfo.offsetEnd: Int
         get() = this.offset + this.size
 }
-//pointerInput을 리턴하는 Modifier의 확장함수
+/**pointerInput을 리턴하는 Modifier의 확장함수*/
 fun Modifier.dragContainer(dragDropState: DragDropState): Modifier {
     return pointerInput(dragDropState) {
         //꾹 누를 시
@@ -286,13 +292,16 @@ fun LazyItemScope.DraggableItem(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.(isDragging: Boolean) -> Unit
 ) {
+    //드래그 중인 아이템
     val dragging = index == dragDropState.draggingItemIndex
+    //그래픽 레이어를 통해 offset 위치 변경
     val draggingModifier = if (dragging) {
         Modifier
             .zIndex(1f)
             .graphicsLayer {
                 translationY = dragDropState.draggingItemOffset
             }
+
     } else if (index == dragDropState.previousIndexOfDraggedItem) {
         Modifier
             .zIndex(1f)
